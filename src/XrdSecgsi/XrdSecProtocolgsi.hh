@@ -125,7 +125,9 @@ typedef char *(*XrdSecgsiGMAP_t)(const char *, int);
 typedef int (*XrdSecgsiAuthz_t)(XrdSecEntity &);
 typedef int (*XrdSecgsiAuthzInit_t)(const char *);
 typedef int (*XrdSecgsiAuthzKey_t)(XrdSecEntity &, char **);
-
+// VOMS extraction
+typedef XrdSecgsiAuthz_t XrdSecgsiVOMS_t;
+typedef XrdSecgsiAuthzInit_t XrdSecgsiVOMSInit_t;
 //
 // This a small class to set the relevant options in one go
 //
@@ -167,6 +169,8 @@ public:
    int    authzpxy; // [s] if 1 make proxy available in exported form in the 'endorsement'
                     //     field of the XrdSecEntity object for use in XrdAcc
    int    vomsat; // [s] 0 do not look for; 1 extract if any
+   char  *vomsfun;// [s] file with the function to fill VOMS [0]
+   char  *vomsfunparms;// [s] parameters for the function to fill VOMS [0]
    int    moninfo; // [s] 0 do not look for; 1 use DN as default
    int    hashcomp; // [cs] 1 send hash names with both algorithms; 0 send only the default [1]
 
@@ -178,7 +182,7 @@ public:
                   gmapfun = 0; gmapfunparms = 0; authzfun = 0; authzfunparms = 0; authzto = -1;
                   ogmap = 1; dlgpxy = 0; sigpxy = 1; srvnames = 0;
                   exppxy = 0; authzpxy = 0;
-                  vomsat = 1; moninfo = 0; hashcomp = 1; }
+                  vomsat = 1; vomsfun = 0; vomsfunparms = 0; moninfo = 0; hashcomp = 1; }
    virtual ~gsiOptions() { } // Cleanup inside XrdSecProtocolgsiInit
    void Print(XrdOucTrace *t); // Print summary of gsi option status
 };
@@ -310,7 +314,9 @@ private:
    static String           SrvAllowedNames;
    static int              VOMSAttrOpt; 
    static XrdSysPlugin    *VOMSPlugin;
-   static int              MonInfoOpt;
+   static XrdSecgsiVOMS_t  VOMSFun;
+   static int              VOMSCertFmt; 
+   static int              MonInfoOpt; 
    static bool             HashCompatibility;
    //
    // Crypto related info
@@ -434,6 +440,8 @@ private:
                   LoadGMAPFun(const char *plugin, const char *parms);
    static XrdSecgsiAuthz_t           // Load alternative function to fill XrdSecEntity
                   LoadAuthzFun(const char *plugin, const char *parms, int &fmt);
+   static XrdSecgsiVOMS_t           // Load alternative function to extract VOMS
+                  LoadVOMSFun(const char *plugin, const char *parms, int &fmt);
    static void    QueryGMAP(XrdCryptoX509Chain* chain, int now, String &name); //Lookup info for DN
    
    // Entity handling
@@ -441,7 +449,7 @@ private:
    void FreeEntity(XrdSecEntity *in);
 
    // VOMS parsing
-   void ExtractVOMS(X509Chain *c, XrdSecEntity &ent);
+   int ExtractVOMS(X509Chain *c, XrdSecEntity &ent);
 };
 
 class gsiHSVars {
