@@ -30,7 +30,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <strings.h>
+#include <string.h>
 #include <stdio.h>
 #include <sys/param.h>
 #include <pwd.h>
@@ -67,6 +67,7 @@ void      ka_StringToKey(char *str, char *cell,
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPwd.hh"
 #include "XrdOuc/XrdOucStream.hh"
+#include "XrdNet/XrdNetAddrInfo.hh"
 
 #include "XrdSys/XrdSysPriv.hh"
 
@@ -270,12 +271,12 @@ static const char *ServerStepStr(int ksrv)
 
 
 //_____________________________________________________________________________
-XrdSecProtocolpwd::XrdSecProtocolpwd(int opts, const char *hname,
-                                     const struct sockaddr *ipadd,
+XrdSecProtocolpwd::XrdSecProtocolpwd(int opts, XrdNetAddrInfo &endPoint,
                                      const char *parms) : XrdSecProtocol("pwd")
 {
    // Default constructor
    EPNAME("XrdSecProtocolpwd");
+   const char *eText;
 
    if (QTRACE(Authen)) { PRINT("constructing: "<<this); }
 
@@ -306,19 +307,15 @@ XrdSecProtocolpwd::XrdSecProtocolpwd(int opts, const char *hname,
    clientCreds = 0;
 
    // Save host name
-   if (hname) {
-      Entity.host = strdup(hname);
-   } else {
-      NOTIFY("warning: host name undefined");
-   }
-   // Save host addr
-   memcpy(&hostaddr, ipadd, sizeof(hostaddr));
+   Entity.host = strdup(endPoint.Name("*unknown*",&eText));
+   if (eText) {NOTIFY("warning: host name undefined");}
+
    // Init client name
    CName[0] = '?'; CName[1] = '\0';
 
    //
    // Notify, if required
-   DEBUG("constructing: host: "<<hname);
+   DEBUG("constructing: host: "<<Entity.host);
    DEBUG("p: "<<XrdSecPROTOIDENT<<", plen: "<<XrdSecPROTOIDLEN);
    //
    // basic settings
@@ -1926,18 +1923,17 @@ XrdVERSIONINFO(XrdSecProtocolpwdObject,secpwd);
  
 extern "C"
 {
-XrdSecProtocol *XrdSecProtocolpwdObject(const char              mode,
-                                        const char             *hostname,
-                                        const struct sockaddr  &netaddr,
-                                        const char             *parms,
-                                        XrdOucErrInfo    *erp)
+XrdSecProtocol *XrdSecProtocolpwdObject(const char      mode,
+                                        XrdNetAddrInfo &endPoint,
+                                        const char     *parms,
+                                        XrdOucErrInfo  *erp)
 {
    XrdSecProtocolpwd *prot;
    int options = XrdSecNOIPCHK;
 
    //
    // Get a new protocol object
-   if (!(prot = new XrdSecProtocolpwd(options, hostname, &netaddr, parms))) {
+   if (!(prot = new XrdSecProtocolpwd(options, endPoint, parms))) {
       char *msg = (char *)"Secpwd: Insufficient memory for protocol.";
       if (erp) 
          erp->setErrInfo(ENOMEM, msg);

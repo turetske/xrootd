@@ -178,7 +178,7 @@ bool XrdOucTPC::cgiHost(tpcInfo &Info, const char *hSpec)
 
 // Resolve the host name
 //
-   hAddr.Set(hName);
+   hAddr.Set(hName,0);
    if ((hName = hAddr.Name())) Info.hName = strdup(hName);
    return hName != 0;
 }
