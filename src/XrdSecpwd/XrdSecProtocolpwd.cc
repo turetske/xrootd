@@ -66,7 +66,6 @@ void      ka_StringToKey(char *str, char *cell,
 #include "XrdSys/XrdSysLogger.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPwd.hh"
-#include "XrdNet/XrdNetAddrInfo.hh"
 #include "XrdOuc/XrdOucStream.hh"
 
 #include "XrdSys/XrdSysPriv.hh"
@@ -306,12 +305,14 @@ XrdSecProtocolpwd::XrdSecProtocolpwd(int opts, const char *hname,
    // Used by servers to store forwarded credentials
    clientCreds = 0;
 
-   // Save host name
+   // Save host name and address
    if (hname) {
       Entity.host = strdup(hname);
    } else {
       NOTIFY("warning: host name undefined");
    }
+   epAddr = endPoint;
+   Entity.addrInfo = &epAddr;
    // Init client name
    CName[0] = '?'; CName[1] = '\0';
 
