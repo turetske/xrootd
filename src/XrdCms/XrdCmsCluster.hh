@@ -42,6 +42,9 @@ class XrdLink;
 class XrdCmsDrop;
 class XrdCmsNode;
 class XrdCmsSelect;
+class XrdCmsPrefNodes;
+class XrdCmsPref;
+
 namespace XrdCms
 {
 struct CmsRRHdr;
@@ -163,7 +166,7 @@ void            ResetRef(SMask_t smask);
 
 // Called to select the best possible node to serve a file (two forms)
 //
-int             Select(XrdCmsSelect &Sel);
+int             Select(XrdCmsSelect &Sel, XrdCmsPref *Pref=NULL);
 
 int             Select(int isrw, int isMulti, SMask_t pmask, int &port,
                        char *hbuff, int &hlen);
@@ -177,6 +180,10 @@ void            Space(XrdCms::SpaceData &sData, SMask_t smask);
 int             Stats(char *bfr, int bln); // Server
 int             Statt(char *bfr, int bln); // Manager
 
+// Called to fill in the PrefNodes structure from our internal Nodes array.
+//
+int             FillInPrefs(XrdCmsPrefNodes & node_prefs);
+
                 XrdCmsCluster();
                ~XrdCmsCluster() {} // This object should never be deleted
 
@@ -189,7 +196,7 @@ void        Record(char *path, const char *reason);
 int         Multiple(SMask_t mVec);
 enum        {eExists, eDups, eROfs, eNoRep, eNoEnt}; // Passed to SelFail
 int         SelFail(XrdCmsSelect &Sel, int rc);
-int         SelNode(XrdCmsSelect &Sel, SMask_t  pmask, SMask_t  amask);
+int         SelNode(XrdCmsSelect &Sel, SMask_t  pmask, SMask_t  amask, XrdCmsPref *prefs=NULL);
 XrdCmsNode *SelbyCost(SMask_t, int &, int &, const char **, int);
 XrdCmsNode *SelbyLoad(SMask_t, int &, int &, const char **, int);
 XrdCmsNode *SelbyRef (SMask_t, int &, int &, const char **, int);
