@@ -49,12 +49,13 @@
 #else
 #define AtomicBeg(Mtx)      Mtx.Lock()
 #define AtomicEnd(Mtx)      Mtx.UnLock()
-#define AtomicAdd(x, y)     x; x += y
+template<typename T, typename U> T AtomicAdd(T &x, const U y) {T tmp = x; x += y; return tmp;}
 #define AtomicCAS(x, y, z)  if (x == y) x = z
 #define AtomicDec(x)        x--
-#define AtomicFAZ(x)        x; x = 0
+template<typename T> T AtomicFAZ(T &x) {T tmp = x; x = 0; return tmp;}
 #define AtomicGet(x)        x
 #define AtomicInc(x)        x++
+template<typename T, typename U> T AtomicSub(T &x, const U y) {T tmp = x; x -= y; return tmp;}
 #define AtomicSub(x, y)     x; x -= y
 #define AtomicZAP(x)        x = 0
 #endif

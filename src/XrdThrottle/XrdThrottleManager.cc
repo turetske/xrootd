@@ -340,7 +340,7 @@ XrdThrottleManager::CheckLoadShed(size_t amount, const std::string &opaque)
    {
       return false;
    }
-   if (rand() % 100*1024*1024*10 > (m_loadshed_frequency)*(amount))
+   if ((static_cast<unsigned>(rand()) % 100*1024*1024*10) > (m_loadshed_frequency)*(amount))
    {
       return false;
    }
