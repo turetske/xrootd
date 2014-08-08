@@ -4,10 +4,10 @@ include( XRootDCommon )
 #-------------------------------------------------------------------------------
 # Shared library version
 #-------------------------------------------------------------------------------
-set( XRD_PSS_VERSION   1.0.0 )
-set( XRD_PSS_SOVERSION 1 )
-set( XRD_BWM_VERSION   1.0.0 )
-set( XRD_BWM_SOVERSION 1 )
+set( XRD_PSS_VERSION   2.0.0 )
+set( XRD_PSS_SOVERSION 2 )
+set( XRD_BWM_VERSION   2.0.0 )
+set( XRD_BWM_SOVERSION 2 )
 set( XRD_THROTTLE_VERSION 1.0.0 )
 set( XRD_THROTTLE_SOVERSION 1 )
 
@@ -33,6 +33,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_PSS_VERSION}
   SOVERSION ${XRD_PSS_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------
@@ -60,6 +61,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_BWM_VERSION}
   SOVERSION ${XRD_BWM_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------

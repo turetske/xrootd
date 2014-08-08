@@ -4,8 +4,8 @@ include( XRootDCommon )
 #-------------------------------------------------------------------------------
 # Shared library version
 #-------------------------------------------------------------------------------
-set( XRD_SEC_KRB5_VERSION   1.0.0 )
-set( XRD_SEC_KRB5_SOVERSION 1 )
+set( XRD_SEC_KRB5_VERSION   2.0.0 )
+set( XRD_SEC_KRB5_SOVERSION 2 )
 
 #-------------------------------------------------------------------------------
 # The XrdSeckrb5 library
@@ -25,6 +25,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SEC_KRB5_VERSION}
   SOVERSION ${XRD_SEC_KRB5_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------

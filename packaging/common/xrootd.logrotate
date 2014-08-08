@@ -1,0 +1,10 @@
+/var/log/xrootd/*/*.log /var/log/xrootd/*.log
+{
+  missingok
+  notifempty
+  daily
+  compress
+  postrotate
+    echo "ping" > `dirname $1`/.`basename $1`;
+  endscript
+}

@@ -41,13 +41,12 @@
 
 #include "XrdVersion.hh"
 
-#include "XrdSys/XrdSysDNS.hh"
 #include "XrdSys/XrdSysHeaders.hh"
 #include "XrdSys/XrdSysLogger.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPlugin.hh"
-#include "XrdSys/XrdSysPriv.hh"
 #include "XrdOuc/XrdOucStream.hh"
+#include "XrdOuc/XrdOucEnv.hh"
 
 #include "XrdSut/XrdSutAux.hh"
 #include "XrdSut/XrdSutCache.hh"
@@ -277,7 +276,7 @@ void gsiHSVars::Dump(XrdSecProtocolgsi *p)
 
 //_____________________________________________________________________________
 XrdSecProtocolgsi::XrdSecProtocolgsi(int opts, const char *hname,
-                                     const struct sockaddr *ipadd,
+                                     XrdNetAddrInfo &endPoint,
                                      const char *parms) : XrdSecProtocol("gsi")
 {
    // Default constructor
@@ -295,14 +294,10 @@ XrdSecProtocolgsi::XrdSecProtocolgsi(int opts, const char *hname,
       PRINT("could not create handshake vars object");
    }
 
-   // Set host name
-   if (ipadd) {
-      Entity.host = XrdSysDNS::getHostName((sockaddr&)*ipadd);
-      // Set host addr
-      memcpy(&hostaddr, ipadd, sizeof(hostaddr));
-   } else {
-      PRINT("WARNING: IP addr undefined: cannot determine host name: failure may follow");
-   }
+   // Set host name and address
+      Entity.host = strdup(endPoint.Name("*unknown*"));
+      epAddr = endPoint;
+      Entity.addrInfo = &epAddr;
 
    // Init session variables
    sessionCF = 0;
@@ -1400,6 +1395,14 @@ XrdSecCredentials *XrdSecProtocolgsi::getCredentials(XrdSecParameters *parm,
          return (XrdSecCredentials *)0;
    }
 
+   // We support passing the user {proxy, cert, key} paths via Url parameter
+   char *upp = (ei && ei->getEnv()) ? ei->getEnv()->Get("xrd.gsiusrpxy") : 0;
+   if (upp) UsrProxy = upp;
+   upp = (ei && ei->getEnv()) ? ei->getEnv()->Get("xrd.gsiusrcrt") : 0;
+   if (upp) UsrCert = upp;
+   upp = (ei && ei->getEnv()) ? ei->getEnv()->Get("xrd.gsiusrkey") : 0;
+   if (upp) UsrKey = upp;
+
    // Count interations
    (hs->Iter)++;
 
@@ -2171,7 +2174,8 @@ int XrdSecProtocolgsi::ExtractVOMS(X509Chain *c, XrdSecEntity &ent)
          } else {
             if (vo.length() > 0) ent.vorg = strdup(vo.c_str());
          }
-         if (grp.length() > 0 && (!ent.grps || grp.length() > strlen(ent.grps))) {
+         if (grp.length() > 0
+         &&  (!ent.grps || grp.length() > int(strlen(ent.grps)))) {
             SafeFree(ent.grps);
             ent.grps = strdup(grp.c_str());
          }
@@ -2199,7 +2203,6 @@ int XrdSecProtocolgsi::ExtractVOMS(X509Chain *c, XrdSecEntity &ent)
 XrdOucTrace *XrdSecProtocolgsi::EnableTracing()
 {
    // Initiate error logging and tracing
-   EPNAME("EnableTracing");
 
    eDest.logger(&Logger);
    GSITrace = new XrdOucTrace(&eDest);
@@ -2687,7 +2690,7 @@ extern "C"
 {
 XrdSecProtocol *XrdSecProtocolgsiObject(const char              mode,
                                         const char             *hostname,
-                                        const struct sockaddr  &netaddr,
+                                        XrdNetAddrInfo         &endPoint,
                                         const char             *parms,
                                         XrdOucErrInfo    *erp)
 {
@@ -2696,8 +2699,8 @@ XrdSecProtocol *XrdSecProtocolgsiObject(const char              mode,
 
    //
    // Get a new protocol object
-   if (!(prot = new XrdSecProtocolgsi(options, hostname, &netaddr, parms))) {
-      char *msg = (char *)"Secgsi: Insufficient memory for protocol.";
+   if (!(prot = new XrdSecProtocolgsi(options, hostname, endPoint, parms))) {
+      const char *msg = "Secgsi: Insufficient memory for protocol.";
       if (erp) 
          erp->setErrInfo(ENOMEM, msg);
       else 
@@ -3073,7 +3076,7 @@ int XrdSecProtocolgsi::ClientDoCert(XrdSutBuffer *br, XrdSutBuffer **bm,
    }
    //
    // Verify the chain
-   x509ChainVerifyOpt_t vopt = { 0, hs->TimeStamp, -1, hs->Crl};
+   x509ChainVerifyOpt_t vopt = {0,static_cast<int>(hs->TimeStamp),-1,hs->Crl};
    XrdCryptoX509Chain::EX509ChainErr ecode = XrdCryptoX509Chain::kNone;
    if (!(hs->Chain->Verify(ecode, &vopt))) {
       emsg = "certificate chain verification failed: ";
@@ -3529,7 +3532,7 @@ int XrdSecProtocolgsi::ServerDoCert(XrdSutBuffer *br,  XrdSutBuffer **bm,
    }
    //
    // Verify the chain
-   x509ChainVerifyOpt_t vopt = { 0, hs->TimeStamp, -1, hs->Crl};
+   x509ChainVerifyOpt_t vopt = {0,static_cast<int>(hs->TimeStamp),-1,hs->Crl};
    XrdCryptoX509Chain::EX509ChainErr ecode = XrdCryptoX509Chain::kNone;
    if (!(hs->Chain->Verify(ecode, &vopt))) {
       cmsg = "certificate chain verification failed: ";
@@ -5383,30 +5386,18 @@ XrdSutPFEntry *XrdSecProtocolgsi::GetSrvCertEnt(XrdSutCacheRef &pfeRef,
    //
    // Get the IDs of the file: we need them to acquire the right privileges when opening
    // the certificate
-   bool getpriv = 0;
    uid_t gsi_uid = geteuid();
    gid_t gsi_gid = getegid();
    struct stat st;
    if (!stat(SrvKey.c_str(), &st)) {
       if (st.st_uid != gsi_uid || st.st_gid != gsi_gid) {
-         getpriv = 1;
          gsi_uid = st.st_uid;
          gsi_gid = st.st_gid;
       }
    }
    
    // Check normal certificates
-   XrdCryptoX509 *xsrv = 0;
-   {  XrdSysPrivGuard pGuard(gsi_uid, gsi_gid);
-      if (pGuard.Valid() || !getpriv) {
-         xsrv = cf->X509(SrvCert.c_str(), SrvKey.c_str());
-      } else {
-         PRINT("problems creating guard to load server certificate '"<<
-               SrvCert<<"' (euid:"<<geteuid()<<", egid:"<<getegid()<<
-               ") <-> (st_uid:"<<st.st_uid<<", st_gid:"<<st.st_gid<<")" );
-         return cent;
-      }
-   }
+   XrdCryptoX509 *xsrv = cf->X509(SrvCert.c_str(), SrvKey.c_str());
    if (xsrv) {
       // Must be of EEC type
       if (xsrv->type != XrdCryptoX509::kEEC) {

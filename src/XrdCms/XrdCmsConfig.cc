@@ -41,7 +41,6 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/un.h>
 #include <dirent.h>
 
 #include "XrdVersion.hh"
@@ -49,6 +48,7 @@
 
 #include "XrdCms/XrdCmsAdmin.hh"
 #include "XrdCms/XrdCmsBaseFS.hh"
+#include "XrdCms/XrdCmsBlackList.hh"
 #include "XrdCms/XrdCmsCache.hh"
 #include "XrdCms/XrdCmsCluster.hh"
 #include "XrdCms/XrdCmsConfig.hh"
@@ -65,10 +65,12 @@
 #include "XrdCms/XrdCmsState.hh"
 #include "XrdCms/XrdCmsSupervisor.hh"
 #include "XrdCms/XrdCmsTrace.hh"
+#include "XrdCms/XrdCmsUtils.hh"
 #include "XrdCms/XrdCmsXmi.hh"
 #include "XrdCms/XrdCmsXmiReq.hh"
 
 #include "XrdNet/XrdNetOpts.hh"
+#include "XrdNet/XrdNetUtils.hh"
 #include "XrdNet/XrdNetSecurity.hh"
 #include "XrdNet/XrdNetSocket.hh"
 
@@ -82,7 +84,6 @@
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucUtils.hh"
 
-#include "XrdSys/XrdSysDNS.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysHeaders.hh"
 #include "XrdSys/XrdSysPlatform.hh"
@@ -165,6 +166,29 @@ void *XrdCmsStartSupervising(void *carg)
       }
 
 /******************************************************************************/
+/*                    P i n g   C l o c k   H a n d l e r                     */
+/******************************************************************************/
+  
+namespace XrdCms
+{
+  
+class PingClock : XrdJob
+{
+public:
+
+       void DoIt() {Config.PingTick++;
+                    Sched->Schedule((XrdJob *)this,time(0)+Config.AskPing);
+                   }
+
+static void Start() {static PingClock selfie;}
+
+          PingClock() : XrdJob("ping clock") {DoIt();}
+         ~PingClock() {}
+private:
+};
+};
+
+/******************************************************************************/
 /*                               d e f i n e s                                */
 /******************************************************************************/
 
@@ -207,21 +231,27 @@ int XrdCmsConfig::Configure1(int argc, char **argv, char *cfn)
 //
    opterr = 0; optind = 1;
    if (argc > 1 && '-' == *argv[1]) 
-      while ((c=getopt(argc,argv,"imsw")) && ((unsigned char)c != 0xff))
+      while ((c=getopt(argc,argv,"iw")) && ((unsigned char)c != 0xff))
      { switch(c)
        {
        case 'i': immed = 1;
                  break;
-       case 'm': isManager = 1;
-                 break;
-       case 's': isServer = 1;
-                 break;
        case 'w': immed = -1;   // Backward compatability only
                  break;
        default:  buff[0] = '-'; buff[1] = optopt; buff[2] = '\0';
-                 Say.Say("Config warning: unrecognized option,",buff,", ignored.");
+                 Say.Say("Config warning: unrecognized option, ",buff,", ignored.");
        }
      }
+
+// Accept a single parameter defining the overiding major role
+//
+   if (optind < argc)
+      {     if (!strcmp(argv[optind], "manager")) isManager = 1;
+       else if (!strcmp(argv[optind], "server" )) isServer  = 1;
+       else if (!strcmp(argv[optind], "super"  )) isServer  = isManager = 1;
+       else Say.Say("Config warning: unrecognized parameter, ",
+                    argv[optind],", ignored.");
+      }
 
 // Bail if no configuration file specified
 //
@@ -289,6 +319,11 @@ int XrdCmsConfig::Configure1(int argc, char **argv, char *cfn)
         myRole   = strdup(XrdCmsRole::Name(rid));
         myRoleID = static_cast<int>(rid);
       }
+
+// Export the role IN basic form and expanded form
+//
+   XrdOucEnv::Export("XRDROLE", myRole);
+   XrdOucEnv::Export("XRDROLETYPE", myRType);
 
 // For managers, make sure that we have a well designated port.
 // For servers or supervisors, force an ephemeral port to be used.
@@ -460,6 +495,7 @@ int XrdCmsConfig::ConfigXeq(char *var, XrdOucStream &CFile, XrdSysError *eDest)
    TS_Xeq("adminpath",     xapath);  // Any,     non-dynamic
    TS_Xeq("allow",         xallow);  // Manager, non-dynamic
    TS_Xeq("altds",         xaltds);  // Server,  non-dynamic
+   TS_Xeq("blacklist",     xblk);    // Manager, non-dynamic
    TS_Xeq("defaults",      xdefs);   // Server,  non-dynamic
    TS_Xeq("dfs",           xdfs);    // Any,     non-dynamic
    TS_Xeq("export",        xexpo);   // Any,     non-dynamic
@@ -535,6 +571,10 @@ void XrdCmsConfig::DoIt()
           return;
           }
       }
+
+// Start the ping clock if we are a manager of any kind
+//
+   if (isManager) PingClock::Start();
 
 // Start the admin thread if we need to, we will not continue until told
 // to do so by the admin interface.
@@ -615,10 +655,7 @@ int XrdCmsConfig::GenLocalPath(const char *oldp, char *newp)
 
 void XrdCmsConfig::ConfigDefaults(void)
 {
-   extern long timezone;
    static XrdVERSIONINFODEF(myVer, cmsd, XrdVNUMBER, XrdVERSION);
-   time_t myTime = time(0);
-   struct tm *tmP = localtime(&myTime);
    int myTZ, isEast = 0;
 
 // Preset all variables with common defaults
@@ -650,6 +687,8 @@ void XrdCmsConfig::ConfigDefaults(void)
    P_pag    = 0;
    AskPerf  = 10;         // Every 10 pings
    AskPing  = 60;         // Every  1 minute
+   PingTick = 0;
+   DoMWChk  = 1;
    MaxDelay = -1;
    LogPerf  = 10;         // Every 10 usage requests
    DiskMin  = 10240;      // 10GB*1024 (Min partition space) in MB
@@ -683,6 +722,7 @@ void XrdCmsConfig::ConfigDefaults(void)
    ManList   =0;
    NanList   =0;
    mySID    = 0;
+   ifList    =0;
    perfint  = 3*60;
    perfpgm  = 0;
    AdminPath= strdup("/tmp/");
@@ -706,6 +746,8 @@ void XrdCmsConfig::ConfigDefaults(void)
    XmiPath     = 0;
    XmiParms    = 0;
    DirFlags    = 0;
+   blkList     = 0;
+   blkChk      = 600;
    SecLib      = 0;
    ossLib      = 0;
    ossParms    = 0;
@@ -717,7 +759,7 @@ void XrdCmsConfig::ConfigDefaults(void)
 
 // Compute the time zone we are in
 //
-   myTZ = timezone/(60*60);
+   myTZ = XrdSysTimer::TimeZone();
    if (myTZ <= 0) {isEast = 0x10; myTZ = -myTZ;}
    if (myTZ > 12) myTZ = 12;
    TimeZone = (myTZ | isEast);
@@ -752,7 +794,7 @@ int XrdCmsConfig::ConfigN2N()
 int XrdCmsConfig::ConfigOSS()
 {
    extern XrdOss *XrdOssGetSS(XrdSysLogger *, const char *, const char *,
-                              const char   *, XrdVersionInfo &);
+                              const char   *, XrdOucEnv  *, XrdVersionInfo &);
 
 // Set up environment for the OSS to keep it relevant for cmsd
 //
@@ -767,7 +809,7 @@ int XrdCmsConfig::ConfigOSS()
 
 // Load and return result
 //
-   return !(ossFS=XrdOssGetSS(Say.logger(),ConfigFN,ossLib,ossParms,*myVInfo));
+   return !(ossFS=XrdOssGetSS(Say.logger(),ConfigFN,ossLib,ossParms,0,*myVInfo));
 }
 
 /******************************************************************************/
@@ -1025,6 +1067,10 @@ int XrdCmsConfig::setupManager()
 //
    if (SecLib && !XrdCmsSecurity::Configure(SecLib, ConfigFN)) return 1;
 
+// Initialize the black list
+//
+   if (!isServer) XrdCmsBlackList::Init(Sched, &Cluster, blkList, blkChk);
+
 // All done
 //
    return 0;
@@ -1096,6 +1142,11 @@ char *XrdCmsConfig::setupSid()
 {
    XrdOucTList *tp = (NanList ? NanList : ManList);
    char sfx;
+
+// Grab the interfaces. This is normally set as an envar. If present then
+// we will copy it because we must use it permanently.
+//
+   if (getenv("XRDIFADDRS")) ifList = strdup(getenv("XRDIFADDRS"));
 
 // Determine what type of role we are playing
 //
@@ -1281,7 +1332,7 @@ int XrdCmsConfig::xaltds(XrdSysError *eDest, XrdOucStream &CFile)
        {if (XrdOuca2x::a2i(*eDest,"data server port",val,&adsPort,1,65535))
            return 1;
        }
-       else if (!(adsPort = XrdSysDNS::getPort(val, "tcp")))
+       else if (!(adsPort = XrdNetUtils::ServPort(val, "tcp")))
                {eDest->Emsg("Config", "Unable to find tcp service '",val,"'.");
                 return 1;
                }
@@ -1314,7 +1365,6 @@ int XrdCmsConfig::xapath(XrdSysError *eDest, XrdOucStream &CFile)
 {
     char *pval, *val;
     mode_t mode = S_IRWXU;
-    struct sockaddr_un USock;
 
 // Get the path
 //
@@ -1326,13 +1376,6 @@ int XrdCmsConfig::xapath(XrdSysError *eDest, XrdOucStream &CFile)
 //
    if (*pval != '/')
       {eDest->Emsg("Config", "adminpath not absolute"); return 1;}
-
-// Make sure path is not too long (account for "/olbd.admin")
-//                                              12345678901
-   if (strlen(pval) > sizeof(USock.sun_path) - 11)
-      {eDest->Emsg("Config", "admin path", pval, "is too long");
-       return 1;
-      }
    pval = strdup(pval);
 
 // Get the optional access rights
@@ -1352,6 +1395,56 @@ int XrdCmsConfig::xapath(XrdSysError *eDest, XrdOucStream &CFile)
    return 0;
 }
 
+/******************************************************************************/
+/*                                  x b l k                                   */
+/******************************************************************************/
+
+/* Function: xblk
+
+   Purpose:  To parse the directive: blacklist [check <time> [path]] | <path>
+
+             <time>    how often to check for black list changes.
+             <path>    the path to the blacklist file
+
+  Output: 0 upon success or !0 upon failure.
+*/
+
+int XrdCmsConfig::xblk(XrdSysError *eDest, XrdOucStream &CFile)
+{
+   char *val = CFile.GetWord();
+
+// We only support this for managers
+//
+   if (!isManager || isServer) return CFile.noEcho();
+
+// See if a time was specified
+//
+   if (val && !strcmp(val, "check"))
+      {if (!(val = CFile.GetWord()) || !val[0])
+          {eDest->Emsg("Config", "blacklist check interval not specified");
+           return 1;
+          }
+       if (XrdOuca2x::a2tm(*eDest, "check value", val, &blkChk, 60)) return 1;
+       if (!(val = CFile.GetWord()))
+          {if (blkList) {free(blkList); blkList = 0;}
+           return 0;
+          }
+      }
+
+// Verify the path it must be absolute
+//
+   if (!val || !val[0])
+      {eDest->Emsg("Config", "blacklist path not specified"); return 1;}
+   if (*val != '/')
+      {eDest->Emsg("Config", "blacklist path not absolute"); return 1;}
+
+// Record the path
+//
+   if (blkList) free(blkList);
+   blkList = strdup(val);
+   return 0;
+}
+  
 /******************************************************************************/
 /*                                x d e l a y                                 */
 /******************************************************************************/
@@ -1818,14 +1911,16 @@ int XrdCmsConfig::xmang(XrdSysError *eDest, XrdOucStream &CFile)
     char **val1, **val2;
     };
 
-    static const int sockALen = sizeof(struct sockaddr);
-    struct sockaddr InetAddr[8];
-    XrdOucTList *tp = 0, *tpp = 0, *tpnew;
-    char *val, *bval = 0, *mval = 0;
-    StorageHelper SHelp(&bval, &mval);
-    int j, i, multi = 0, port = 0, xMeta = 0, xPeer = 0, xProxy = 0, Prt = 1;
+    XrdOucTList **theList = &ManList;
+    char *val, *hSpec = 0, *hPort = 0;
+    StorageHelper SHelp(&hSpec, &hPort);
+    int rc, xMeta = 0, xPeer = 0, xProxy = 0, *myPort = 0;
 
-//  Process the optional "peer" or "proxy"
+// Ignore this call if we are a meta-manager and know our port number
+//
+   if (isMeta && PortTCP > 0) return CFile.noEcho();
+
+//  Process the optional "meta", "peer" or "proxy"
 //
     if ((val = CFile.GetWord()))
        {if ((xMeta  = !strcmp("meta", val))
@@ -1843,94 +1938,41 @@ int XrdCmsConfig::xmang(XrdSysError *eDest, XrdOucStream &CFile)
     if (val)
        if (!strcmp("any", val) || !strcmp("all", val)) val = CFile.GetWord();
 
-//  Get the actual host name
+//  Get the actual host name and copy it
 //
     if (!val)
        {eDest->Emsg("Config","manager host name not specified"); return 1;}
-    mval = strdup(val);
+    hSpec = strdup(val);
 
-//  Grab the port number
+//  Grab the port number (either in hostname or following token)
 //
-    if ((val = index(mval, ':'))) {*val = '\0'; val++;}
-       else val = CFile.GetWord();
+    if (!(hPort = XrdCmsUtils::ParseManPort(eDest, CFile, hSpec))) return 1;
 
-    if (val)
-       {if (isdigit(*val))
-           {if (XrdOuca2x::a2i(*eDest,"manager port",val,&port,1,65535))
-               port = 0;
-           }
-           else if (!(port = XrdSysDNS::getPort(val, "tcp")))
-                   {eDest->Emsg("Config", "Unable to find tcp service '",val,"'.");
-                    port = 0;
-                   }
-       }
-       else if (!(port = PortTCP))
-               eDest->Emsg("Config","manager port not specified for",mval);
-
-    if (!port) return 1;
-
-    if ((val = CFile.GetWord()))
-       {if (strcmp(val, "if"))
-           {eDest->Emsg("Config","expecting manager 'if' but",val,"found");
-            return 1;
-           }
-        if ((i=XrdOucUtils::doIf(eDest,CFile,"manager directive",
-                            myName,myInsName,myProg))<=0)
-           {if (!i) CFile.noEcho(); return i < 0;}
-       }
-
-    i = strlen(mval);
-    if (mval[i-1] != '+') 
-       {i = 1;
-        if (!XrdSysDNS::getHostAddr(mval, InetAddr))
-           {eDest->Emsg("CFile","Manager host", mval, "not found");
-            return 1;
-           }
-        free(mval); mval = XrdSysDNS::getHostName(InetAddr[0]);
-       }
-        else {bval = strdup(mval); mval[i-1] = '\0'; multi = 1;
-              if (!(i = XrdSysDNS::getHostAddr(mval, InetAddr, 8)))
-                 {eDest->Emsg("CFile","Manager host", mval, "not found");
-                  return 1;
-                 }
-             }
-
-// Now try to determine our port number if we are a [meta] manager
+// Check if this statement is gaurded by and "if" and process it
 //
-    if (isManager && !isServer)
-       {if ((xMeta && isMeta) || (!xMeta && !isMeta))
-           for (j = 0; j < i; j++)
-                if (!memcmp(&InetAddr[j], &myAddr, sockALen))
-                   {PortTCP = port; break;}
-        if (isMeta) return (xMeta ? 0: CFile.noEcho());
-        if (!xMeta) Prt = 0;
+   if ((val = CFile.GetWord()))
+      {if (strcmp(val, "if"))
+          {eDest->Emsg("Config","expecting manager 'if' but",val,"found");
+           return 1;
+          }
+       if ((rc = XrdOucUtils::doIf(eDest,CFile,"manager directive",
+                                   myName,myInsName,myProg))<=0)
+          {if (!rc) CFile.noEcho(); return rc < 0;}
+      }
+
+// Calculate the correct queue and port number to update
+//
+   if (isManager && !isServer)
+//    {if (((xMeta && isMeta) || (!xMeta && !isMeta)) && PortTCP < 1)
+      {if (((xMeta && isMeta) || (!xMeta && !isMeta)))
+          myPort = &PortTCP;
+        if (isMeta) theList = 0;
+           else theList = (xMeta ? &ManList : &NanList);
        }
 
-// Now construct the list of [meta] managers
+// Parse the specification and return
 //
-    do {if (multi)
-           {free(mval);
-            char mvBuff[1024];
-            if (Prt) sprintf(mvBuff, "%s -> all.manager ", bval);
-            mval = XrdSysDNS::getHostName(InetAddr[i-1]);
-            if (Prt) eDest->Say("Config ", mvBuff, mval);
-           }
-        tp = (Prt ? ManList : NanList); tpp = 0; j = 1;
-        while(tp) 
-             if ((j = strcmp(tp->text, mval)) < 0 || tp->val != port)
-                {tpp = tp; tp = tp->next;}
-                else {if (Prt && !j)
-                         eDest->Say("Config warning: duplicate manager ",mval);
-                      break;
-                     }
-        if (j) {tpnew = new XrdOucTList(mval, port, tp);
-                if (tpp) tpp->next = tpnew;
-                   else if (Prt) ManList = tpnew;
-                           else  NanList = tpnew;
-               }
-       } while(--i);
-
-    return 0;
+   return (XrdCmsUtils::ParseMan(eDest, theList, hSpec, hPort, myPort) ? 0 : 1);
 }
   
 /******************************************************************************/
@@ -2121,7 +2163,7 @@ int XrdCmsConfig::xping(XrdSysError *eDest, XrdOucStream &CFile)
     if (!(val = CFile.GetWord()))
        {eDest->Emsg("Config", "ping value not specified"); return 1;}
     if (XrdOuca2x::a2tm(*eDest, "ping interval",val,&ping,0)) return 1;
-
+    if (ping < 3) ping = 3;
 
     while((val = CFile.GetWord()))
         {     if (!strcmp("log", val))
@@ -2413,7 +2455,7 @@ int XrdCmsConfig::xrole(XrdSysError *eDest, XrdOucStream &CFile)
 {
     XrdCmsRole::RoleID roleID;
     char *val, *Tok1, *Tok2;
-    int rc, xMeta=0, xPeer=0, xProxy=0, xServ=0, xMan=0, xSolo=0, xSup=0;
+    int rc, xMeta=0, xPeer=0, xProxy=0, xServ=0, xMan=0, xSolo=0;
 
 // Get the first token
 //
@@ -2448,7 +2490,7 @@ int XrdCmsConfig::xrole(XrdSysError *eDest, XrdOucStream &CFile)
    switch(roleID)
          {case XrdCmsRole::MetaManager:  xMeta  = xMan  =         -1; break;
           case XrdCmsRole::Manager:               xMan  =         -1; break;
-          case XrdCmsRole::Supervisor:   xSup   = xMan  = xServ = -1; break;
+          case XrdCmsRole::Supervisor:            xMan  = xServ = -1; break;
           case XrdCmsRole::Server:                        xServ = -1; break;
           case XrdCmsRole::ProxyManager: xProxy = xMan  =         -1; break;
           case XrdCmsRole::ProxySuper:   xProxy = xMan  = xServ = -1; break;
@@ -2467,7 +2509,7 @@ int XrdCmsConfig::xrole(XrdSysError *eDest, XrdOucStream &CFile)
 // If the role was specified on the command line, issue warning and ignore this
 //
    if (isServer > 0 || isManager > 0 || isProxy > 0 || isPeer > 0)
-      {eDest->Say("Config warning: role directive over-ridden by command line options.");
+      {eDest->Say("Config warning: role directive over-ridden by command line.");
        return 0;
       }
 
@@ -2603,6 +2645,8 @@ int XrdCmsConfig::xsecl(XrdSysError *eDest, XrdOucStream &CFile)
 
                           [[min] {<mnp> [<min>] | <min>}  [[<hwp>] <hwm>]]
 
+                          [mwfiles]
+
              <num> Maximum number of times a server may be reselected without
                    a break. The default is 0.
 
@@ -2619,6 +2663,10 @@ int XrdCmsConfig::xsecl(XrdSysError *eDest, XrdOucStream &CFile)
 
              <sec> Number of seconds that must elapse before a disk free space
                    calculation will occur.
+
+             mwfiles
+                   space supports multiple writable file copies. This suppresses
+                   multiple file check when open a file in write mode.
 
    Notes:   This is used by the manager and the server.
 
@@ -2649,6 +2697,7 @@ int XrdCmsConfig::xspace(XrdSysError *eDest, XrdOucStream &CFile)
                   {eDest->Emsg("Config", "space min value not specified"); return 1;}
                break;
               }
+      else if (!strcmp("mwfiles", val)) DoMWChk = 0;
       else if (isdigit(*val)) break;
       else {eDest->Emsg("Config", "invalid space parameters"); return 1;}
       }

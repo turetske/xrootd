@@ -57,7 +57,10 @@ XrdXrootdXPath        XrdXrootdProtocol::RPList;
 XrdXrootdXPath        XrdXrootdProtocol::RQList;
 XrdXrootdXPath        XrdXrootdProtocol::XPList;
 XrdSfsFileSystem     *XrdXrootdProtocol::osFS;
+XrdSfsFileSystem     *XrdXrootdProtocol::digFS    = 0;
 char                 *XrdXrootdProtocol::FSLib[2] = {0, 0};
+char                 *XrdXrootdProtocol::digLib   = 0;
+char                 *XrdXrootdProtocol::digParm  = 0;
 XrdXrootdFileLock    *XrdXrootdProtocol::Locker;
 XrdSecService        *XrdXrootdProtocol::CIA      = 0;
 char                 *XrdXrootdProtocol::SecLib   = 0;
@@ -68,6 +71,7 @@ XrdSysError           XrdXrootdProtocol::eDest(0, "Xrootd");
 XrdXrootdStats       *XrdXrootdProtocol::SI;
 XrdXrootdJob         *XrdXrootdProtocol::JobCKS   = 0;
 char                 *XrdXrootdProtocol::JobCKT   = 0;
+XrdOucReqID          *XrdXrootdProtocol::PrepID   = 0;
 
 char                 *XrdXrootdProtocol::Notify = 0;
 int                   XrdXrootdProtocol::hailWait;
@@ -107,7 +111,7 @@ int                   XrdXrootdProtocol::myPID = static_cast<int>(getpid());
 int                   XrdXrootdProtocol::myRole = 0;
 int                   XrdXrootdProtocol::myRolf = 0;
 
-struct XrdXrootdProtocol::RD_Table XrdXrootdProtocol::Route[RD_Num] = {{0,0}};
+struct XrdXrootdProtocol::RD_Table XrdXrootdProtocol::Route[RD_Num];
 
 /******************************************************************************/
 /*            P r o t o c o l   M a n a g e m e n t   S t a c k s             */
@@ -234,13 +238,13 @@ static  const int hpSZ = hsSZ + prSZ;
 static  struct hs_response
                {kXR_unt16 streamid;
                 kXR_unt16 status;
-                kXR_int32 rlen;
-                kXR_int32 pval;
-                kXR_int32 styp;
+                kXR_unt32 rlen;   // Specified as kXR_int32 in doc!
+                kXR_unt32 pval;   // Specified as kXR_int32 in doc!
+                kXR_unt32 styp;   // Specified as kXR_int32 in doc!
                } hsresp={0, 0, htonl(8), // isRedir == 'M' -> MetaManager
                          htonl(kXR_PROTOCOLVERSION),
-                         (isRedir ? htonl(kXR_LBalServer)
-                                  : htonl(kXR_DataServer))};
+                         (isRedir ? htonl((unsigned int)kXR_LBalServer)
+                                  : htonl((unsigned int)kXR_DataServer))};
 
 XrdXrootdProtocol *xp;
 int dlen, rc;
@@ -311,6 +315,7 @@ int dlen, rc;
    xp->Response.Set(lp);
    strcpy(xp->Entity.prot, "host");
    xp->Entity.host = (char *)lp->Host();
+   xp->Entity.addrInfo = lp->AddrInfo();
    return (XrdProtocol *)xp;
 }
  
@@ -553,7 +558,7 @@ void XrdXrootdProtocol::Recycle(XrdLink *lp, int csec, const char *reason)
 
 // Push ourselves on the stack
 //
-   ProtStack.Push(&ProtLink);
+   if (Response.isOurs()) ProtStack.Push(&ProtLink);
 }
 
 /******************************************************************************/
@@ -625,9 +630,17 @@ void XrdXrootdProtocol::Cleanup()
    XrdXrootdPio *pioP;
    int i;
 
+// Release any internal monitoring information
+//
+   if (Entity.moninfo) {free(Entity.moninfo); Entity.moninfo = 0;}
+
 // If we have a buffer, release it
 //
    if (argp) {BPool->Release(argp); argp = 0;}
+
+// Notify the filesystem of a disconnect prior to deleting file tables
+//
+   if (Status != XRD_BOUNDPATH) osFS->Disc(Client);
 
 // Delete the FTab if we have it
 //
@@ -711,6 +724,7 @@ void XrdXrootdProtocol::Reset()
    myIOLen            = 0;
    myStalls           = 0;
    myAioReq           = 0;
+   myFile             = 0;
    numReads           = 0;
    numReadP           = 0;
    numReadV           = 0;
@@ -735,6 +749,7 @@ void XrdXrootdProtocol::Reset()
    rvSeq              = 0;
    pioFree = pioFirst = pioLast = 0;
    isActive = isDead  = isNOP = isBound = 0;
+   rdType             = 0;
    memset(&Entity, 0, sizeof(Entity));
    memset(Stream,  0, sizeof(Stream));
 }

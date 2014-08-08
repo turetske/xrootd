@@ -4,14 +4,14 @@ include( XRootDCommon )
 #-------------------------------------------------------------------------------
 # Shared library version
 #-------------------------------------------------------------------------------
-set( XRD_SEC_VERSION        0.0.1 )
-set( XRD_SEC_SOVERSION      0 )
-set( XRD_SEC_PWD_VERSION    1.0.0 )
-set( XRD_SEC_PWD_SOVERSION  1 )
-set( XRD_SEC_SSS_VERSION    1.0.0 )
-set( XRD_SEC_SSS_SOVERSION  1 )
-set( XRD_SEC_UNIX_VERSION   1.0.0 )
-set( XRD_SEC_UNIX_SOVERSION 1 )
+set( XRD_SEC_VERSION        1.0.0 )
+set( XRD_SEC_SOVERSION      1 )
+set( XRD_SEC_PWD_VERSION    2.0.0 )
+set( XRD_SEC_PWD_SOVERSION  2 )
+set( XRD_SEC_SSS_VERSION    2.0.0 )
+set( XRD_SEC_SSS_SOVERSION  2 )
+set( XRD_SEC_UNIX_VERSION   2.0.0 )
+set( XRD_SEC_UNIX_SOVERSION 2 )
 
 #-------------------------------------------------------------------------------
 # The XrdSec library
@@ -22,6 +22,7 @@ add_library(
   XrdSec/XrdSecClient.cc
                                       XrdSec/XrdSecEntity.hh
                                       XrdSec/XrdSecInterface.hh
+  XrdSec/XrdSecLoader.cc              XrdSec/XrdSecLoader.hh
   XrdSec/XrdSecPManager.cc            XrdSec/XrdSecPManager.hh
   XrdSec/XrdSecProtocolhost.cc        XrdSec/XrdSecProtocolhost.hh
   XrdSec/XrdSecServer.cc              XrdSec/XrdSecServer.hh
@@ -39,6 +40,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SEC_VERSION}
   SOVERSION ${XRD_SEC_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 # FIXME: test
@@ -66,6 +68,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SEC_PWD_VERSION}
   SOVERSION ${XRD_SEC_PWD_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------
@@ -101,6 +104,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SEC_SSS_VERSION}
   SOVERSION ${XRD_SEC_SSS_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------
@@ -132,6 +136,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SEC_UNIX_VERSION}
   SOVERSION ${XRD_SEC_UNIX_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------

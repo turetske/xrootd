@@ -4,10 +4,10 @@ include( XRootDCommon )
 #-------------------------------------------------------------------------------
 # Shared library version
 #-------------------------------------------------------------------------------
-set( XRD_SERVER_VERSION   1.0.0 )
-set( XRD_SERVER_SOVERSION 1 )
-set( XRD_XROOTD_VERSION   1.0.0 )
-set( XRD_XROOTD_SOVERSION 1 )
+set( XRD_SERVER_VERSION   2.0.0 )
+set( XRD_SERVER_SOVERSION 2 )
+set( XRD_XROOTD_VERSION   2.0.0 )
+set( XRD_XROOTD_SOVERSION 2 )
 
 #-------------------------------------------------------------------------------
 # The XrdClient lib
@@ -21,6 +21,7 @@ add_library(
   #-----------------------------------------------------------------------------
   XrdSfs/XrdSfsNative.cc       XrdSfs/XrdSfsNative.hh
                                XrdSfs/XrdSfsAio.hh
+                               XrdSfs/XrdSfsFlags.hh
                                XrdSfs/XrdSfsInterface.hh
 
   #-----------------------------------------------------------------------------
@@ -57,7 +58,8 @@ add_library(
   XrdOss/XrdOssRename.cc
   XrdOss/XrdOssSpace.cc        XrdOss/XrdOssSpace.hh
   XrdOss/XrdOssStage.cc        XrdOss/XrdOssStage.hh
-  XrdOss/XrdOssStat.cc         XrdOss/XrdOssUnlink.cc
+  XrdOss/XrdOssStat.cc         XrdOss/XrdOssStatInfo.hh
+                               XrdOss/XrdOssUnlink.cc
                                XrdOss/XrdOssError.hh
                                XrdOss/XrdOss.hh
 
@@ -77,6 +79,7 @@ add_library(
   #-----------------------------------------------------------------------------
   # XrdCms - client
   #-----------------------------------------------------------------------------
+  XrdCms/XrdCmsBlackList.cc       XrdCms/XrdCmsBlackList.hh
   XrdCms/XrdCmsLogin.cc           XrdCms/XrdCmsLogin.hh
   XrdCms/XrdCmsParser.cc          XrdCms/XrdCmsParser.hh
   XrdCms/XrdCmsRRData.cc          XrdCms/XrdCmsRRData.hh
@@ -91,6 +94,7 @@ add_library(
   XrdCms/XrdCmsReq.cc             XrdCms/XrdCmsReq.hh
   XrdCms/XrdCmsRTable.cc          XrdCms/XrdCmsRTable.hh
                                   XrdCms/XrdCmsTypes.hh
+  XrdCms/XrdCmsUtils.cc           XrdCms/XrdCmsUtils.hh
                                   XrdCms/XrdCmsXmi.hh
   XrdCms/XrdCmsXmiReq.cc          XrdCms/XrdCmsXmiReq.hh
 )
@@ -107,6 +111,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_SERVER_VERSION}
   SOVERSION ${XRD_SERVER_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------
@@ -117,6 +122,7 @@ add_library(
   SHARED
   XrdXrootd/XrdXrootdAdmin.cc           XrdXrootd/XrdXrootdAdmin.hh
   XrdXrootd/XrdXrootdAio.cc             XrdXrootd/XrdXrootdAio.hh
+  XrdXrootd/XrdXrootdBridge.cc          XrdXrootd/XrdXrootdBridge.hh
   XrdXrootd/XrdXrootdCallBack.cc        XrdXrootd/XrdXrootdCallBack.hh
   XrdXrootd/XrdXrootdConfig.cc
   XrdXrootd/XrdXrootdFile.cc            XrdXrootd/XrdXrootdFile.hh
@@ -136,6 +142,9 @@ add_library(
   XrdXrootd/XrdXrootdResponse.cc        XrdXrootd/XrdXrootdResponse.hh
                                         XrdXrootd/XrdXrootdStat.icc
   XrdXrootd/XrdXrootdStats.cc           XrdXrootd/XrdXrootdStats.hh
+  XrdXrootd/XrdXrootdTransit.cc         XrdXrootd/XrdXrootdTransit.hh
+  XrdXrootd/XrdXrootdTransPend.cc       XrdXrootd/XrdXrootdTransPend.hh
+  XrdXrootd/XrdXrootdTransSend.cc       XrdXrootd/XrdXrootdTransSend.hh
   XrdXrootd/XrdXrootdXeq.cc
   XrdXrootd/XrdXrootdXeqAio.cc
                                         XrdXrootd/XrdXrootdTrace.hh
@@ -156,6 +165,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_XROOTD_VERSION}
   SOVERSION ${XRD_XROOTD_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------

@@ -27,6 +27,8 @@
 /******************************************************************************/
 #include <time.h>
 
+#include "XrdNet/XrdNetAddrInfo.hh"
+
 #include "XrdOuc/XrdOucErrInfo.hh"
 #include "XrdOuc/XrdOucHash.hh"
 #include "XrdSys/XrdSysPthread.hh"
@@ -265,8 +267,8 @@ public:
         XrdSecCredentials *getCredentials(XrdSecParameters  *parm=0,
                                           XrdOucErrInfo     *einfo=0);
 
-        XrdSecProtocolgsi(int opts, const char *hname,
-                          const struct sockaddr *ipadd, const char *parms = 0);
+        XrdSecProtocolgsi(int opts, const char *hname, XrdNetAddrInfo &endPoint,
+                                    const char *parms = 0);
         virtual ~XrdSecProtocolgsi() {} // Delete() does it all
 
         // Initialization methods
@@ -294,6 +296,7 @@ public:
         static XrdOucTrace *EnableTracing();
 
 private:
+          XrdNetAddrInfo   epAddr;
 
    // Static members initialized at startup
    static XrdSysMutex      gsiContext;
@@ -372,7 +375,6 @@ private:
 
    // Information local to this instance
    int              options;
-   struct sockaddr  hostaddr;      // Client-side only
    XrdCryptoFactory *sessionCF;    // Chosen crypto factory
    XrdCryptoCipher *sessionKey;    // Session Key (result of the handshake)
    XrdSutBucket    *bucketKey;     // Bucket with the key in export form

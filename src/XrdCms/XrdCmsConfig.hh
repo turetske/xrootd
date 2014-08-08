@@ -31,7 +31,6 @@
 /******************************************************************************/
 
 #include <stdlib.h>
-#include <sys/socket.h>
 
 #include "Xrd/XrdJob.hh"
 #include "XrdCms/XrdCmsPList.hh"
@@ -88,6 +87,7 @@ int         RefReset;     // Min seconds    before a global ref count reset
 int         RefTurn;      // Min references before a global ref count reset
 int         AskPerf;      // Seconds between perf queries
 int         AskPing;      // Number of ping requests per AskPerf window
+int         PingTick;     // Ping clock value
 int         LogPerf;      // AskPerf intervals before logging perf
 
 int         PortTCP;      // TCP Port to  listen on
@@ -102,6 +102,9 @@ int         P_io;         // % I/O Capacity in load factor
 int         P_load;       // % MSC Capacity in load factor
 int         P_mem;        // % MEM Capacity in load factor
 int         P_pag;        // % PAG Capacity in load factor
+
+char        DoMWChk;      // When true (default) perform multiple write check
+char        Rsvd[3];      // Reserved for alignment
 
 int         DiskMin;      // Minimum MB needed of space in a partition
 int         DiskHWM;      // Minimum MB needed of space to requalify
@@ -143,6 +146,7 @@ const char  *myDomain;
 const char  *myInsName;
 const char  *myInstance;
 const char  *mySID;
+const char  *ifList;
 XrdOucTList *ManList;     // From manager directive
 XrdOucTList *NanList;     // From manager directive (managers only)
 
@@ -162,7 +166,6 @@ XrdNetSocket      *AdminSock;
 XrdNetSocket      *AnoteSock;
 XrdNetSocket      *RedirSock;
 XrdNetSecurity    *Police;
-struct sockaddr    myAddr;
 
       XrdCmsConfig() : XrdJob("cmsd startup") {ConfigDefaults();}
      ~XrdCmsConfig() {}
@@ -191,6 +194,7 @@ int  xapath(XrdSysError *edest, XrdOucStream &CFile);
 int  xallow(XrdSysError *edest, XrdOucStream &CFile);
 int  xaltds(XrdSysError *edest, XrdOucStream &CFile);
 int  Fsysadd(XrdSysError *edest, int chk, char *fn);
+int  xblk(XrdSysError *edest, XrdOucStream &CFile);
 int  xdelay(XrdSysError *edest, XrdOucStream &CFile);
 int  xdefs(XrdSysError *edest, XrdOucStream &CFile);
 int  xdfs(XrdSysError *edest, XrdOucStream &CFile);
@@ -225,6 +229,8 @@ int               inArgc;
 char             *SecLib;
 char             *XmiPath;
 char             *XmiParms;
+char             *blkList;
+int               blkChk;
 int               isManager;
 int               isMeta;
 int               isPeer;

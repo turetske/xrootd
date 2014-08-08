@@ -86,7 +86,7 @@ int     isCompressed(char *cxidp=0);
 ssize_t Read(               off_t, size_t);
 ssize_t Read(       void *, off_t, size_t);
 int     Read(XrdSfsAio *aiop);
-ssize_t ReadV(XrdOucIOVec *readV, size_t n);
+ssize_t ReadV(XrdOucIOVec *readV, int n);
 ssize_t ReadRaw(    void *, off_t, size_t);
 ssize_t Write(const void *, off_t, size_t);
 int     Write(XrdSfsAio *aiop);
@@ -124,6 +124,7 @@ virtual XrdOssDF *newFile(const char *tident)
 int       Chmod(const char *, mode_t mode, XrdOucEnv *eP=0);
 virtual
 int       Create(const char *, const char *, mode_t, XrdOucEnv &, int opts=0);
+void      EnvInfo(XrdOucEnv *envP);
 int       Init(XrdSysLogger *, const char *);
 int       Lfn2Pfn(const char *Path, char *buff, int blen);
 const
@@ -136,6 +137,8 @@ int       Stat(const char *, struct stat *, int opts=0, XrdOucEnv *eP=0);
 int       Truncate(const char *, unsigned long long, XrdOucEnv *eP=0);
 int       Unlink(const char *, int Opts=0, XrdOucEnv *eP=0);
 
+static char *P2OUT(int &retc,  char *pbuff, int pblen,
+                   const char *path, const char *Ident);
 static char *P2URL(int &retc, char *pbuff, int pblen,
                    const char *path,       int Split=0,
                    const char *Cgi=0,      int CgiLn=0,
@@ -182,6 +185,8 @@ char              *cPath;    // -> Cache path
 char              *cParm;    // -> Cache parameters
 XrdVersionInfo    *myVersion;// -> Compilation version
 int                TraceLvl; // Tracing options
+static bool        outProxy; // True means outgoing proxy
+static bool        pfxProxy; // True means outgoing proxy is prefixed
 
 int    buildHdr();
 int    Configure(const char *);
@@ -195,6 +200,7 @@ char  *xcapr(XrdSysError *Eroute, XrdOucStream &Config, char *pBuff);
 int    xconf(XrdSysError *Eroute, XrdOucStream &Config);
 int    xdef( XrdSysError *Eroute, XrdOucStream &Config);
 int    xexp( XrdSysError *Eroute, XrdOucStream &Config);
+int    xinet(XrdSysError *errp,   XrdOucStream &Config);
 int    xorig(XrdSysError *errp,   XrdOucStream &Config);
 int    xsopt(XrdSysError *Eroute, XrdOucStream &Config);
 int    xtrac(XrdSysError *Eroute, XrdOucStream &Config);

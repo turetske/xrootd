@@ -35,7 +35,6 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/un.h>
 
 #ifdef __solaris__
 #include <sys/isa_defs.h>
@@ -57,7 +56,6 @@
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucTrace.hh"
 #include "XrdOuc/XrdOucUtils.hh"
-#include "XrdSys/XrdSysDNS.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysHeaders.hh"
 #include "XrdSys/XrdSysLogger.hh"
@@ -77,6 +75,7 @@
 #include "XrdXrootd/XrdXrootdXPath.hh"
 
 #include "Xrd/XrdBuffer.hh"
+#include "Xrd/XrdInet.hh"
 
 /******************************************************************************/
 /*         P r o t o c o l   C o m m a n d   L i n e   O p t i o n s          */
@@ -109,8 +108,6 @@ extern          XrdOucTrace       *XrdXrootdTrace;
 
                 XrdXrootdPrepare  *XrdXrootdPrepQ;
 
-                XrdOucReqID       *XrdXrootdReqID;
-
                 const char        *XrdXrootdInstance;
 
                 int                XrdXrootdPort;
@@ -140,11 +137,17 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
    extern XrdSfsFileSystem *XrdXrootdloadFileSystem(XrdSysError *, 
                                                     XrdSfsFileSystem *,
                                                     char *, const char *);
+   extern XrdSfsFileSystem *XrdDigGetFS
+                            (XrdSfsFileSystem *nativeFS,
+                             XrdSysLogger     *Logger,
+                             const char       *configFn,
+                             const char       *theParms);
    extern int optind, opterr;
 
+   XrdOucEnv myEnv;
    XrdXrootdXPath *xp;
    void *secGetProt = 0;
-   char *adminp, *fsver, *rdf, *bP, *tmp, c, buff[1024];
+   char *adminp, *rdf, *bP, *tmp, c, buff[1024];
    int i, n, deper = 0;
 
 // Copy out the special info we want to use at top level
@@ -211,6 +214,7 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
 //
    if (!(as_miniosz = as_segsize/2)) as_miniosz = as_segsize;
    maxTransz = maxBuffsz = BPool->MaxSize();
+   memset(Route, 0, sizeof(Route));
 
 // Now process and configuration parameters
 //
@@ -250,31 +254,53 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
                }
            }
 
+// Set up the network for self-identification and display it
+//
+   pi->NetTCP->netIF.Port(Port);
+   pi->NetTCP->netIF.Display("Config ");
+
+// Establish our specific environment that will be passed along
+//
+   myEnv.PutPtr("XrdInet*", (void *)(pi->NetTCP));
+   myEnv.PutPtr("XrdNetIF*", (void *)(&(pi->NetTCP->netIF)));
+   myEnv.PutPtr("XrdSecGetProtocol*", secGetProt);
+   myEnv.PutPtr("XrdScheduler*", Sched);
+
 // Get the filesystem to be used
 //
    if (FSLib[0])
       {TRACE(DEBUG, "Loading base filesystem library " <<FSLib[0]);
        osFS = XrdXrootdloadFileSystem(&eDest, 0, FSLib[0], pi->ConfigFN);
       } else {
-       XrdOucEnv myEnv;
-       myEnv.PutPtr("XrdInet*", (void *)(pi->NetTCP));
-       myEnv.PutPtr("XrdSecGetProtocol*", secGetProt);
        osFS = XrdSfsGetDefaultFileSystem(0,eDest.logger(),pi->ConfigFN,&myEnv);
       }
    if (!osFS)
       {eDest.Emsg("Config", "Unable to load file system.");
        return 0;
-      } else SI->setFS(osFS);
+      } else {
+       SI->setFS(osFS);
+       if (FSLib[0]) osFS->EnvInfo(&myEnv);
+      }
 
 // Check if we have a wrapper library
 //
    if (FSLib[1])
-      {TRACE(DEBUG, "Loading wrapper filesystem library " <<FSLib[0]);
-       osFS = XrdXrootdloadFileSystem(&eDest, osFS, FSLib[0], pi->ConfigFN);
+      {TRACE(DEBUG, "Loading wrapper filesystem library " <<FSLib[1]);
+       osFS = XrdXrootdloadFileSystem(&eDest, osFS, FSLib[1], pi->ConfigFN);
        if (!osFS)
           {eDest.Emsg("Config", "Unable to load file system wrapper.");
            return 0;
-          }
+          } else osFS->EnvInfo(&myEnv);
+      }
+
+// Check if the diglib should be loaded. We only support the builtin one. In
+// the future we will have to change this code to be like the above.
+//
+   if (digParm)
+      {TRACE(DEBUG, "Loading dig filesystem builtin");
+       digFS = XrdDigGetFS(osFS, eDest.logger(), pi->ConfigFN, digParm);
+       if (!digFS) eDest.Emsg("Config","Unable to load digFS; "
+                                       "remote debugging disabled!");
       }
 
 // Check if we are going to be processing checksums locally
@@ -306,8 +332,7 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
 
 // Initialize the request ID generation object
 //
-   XrdXrootdReqID = new XrdOucReqID((int)Port, pi->myName,
-                                    XrdSysDNS::IPAddr(pi->myAddr));
+   PrepID = new XrdOucReqID(pi->urAddr, (int)Port);
 
 // Initialize for prepare processing
 //
@@ -331,9 +356,12 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
 //
    if ((xp = RPList.Next()))
       {int k;
-       char buff[512];
+       char buff[1024], puff[1024];
        do {k = xp->Opts();
-           sprintf(buff, " to %s:%d", Route[k].Host, Route[k].Port);
+           if (Route[k].Host[0] == Route[k].Host[1]
+           &&  Route[k].Port[0] == Route[k].Port[1]) *puff = 0;
+              else sprintf(puff, "%%%s:%d", Route[k].Host[1], Route[k].Port[1]);
+           sprintf(buff," to %s:%d%s",Route[k].Host[0],Route[k].Port[0],puff);
            eDest.Say("Config redirect static ", xp->Path(), buff);
            xp = xp->Next();
           } while(xp);
@@ -342,28 +370,34 @@ int XrdXrootdProtocol::Configure(char *parms, XrdProtocol_Config *pi)
    if ((xp = RQList.Next()))
       {int k;
        const char *cgi1, *cgi2;
-       char buff[1024], xCgi[RD_Num] = {0};
+       char buff[1024], puff[1024], xCgi[RD_Num] = {0};
        if (isRedir) {cgi1 = "+"; cgi2 = getenv("XRDCMSCLUSTERID");}
           else      {cgi1 = "";  cgi2 = pi->myName;}
        do {k = xp->Opts();
-           sprintf(buff, " to %s:%d", Route[k].Host, Route[k].Port);
+           if (Route[k].Host[0] == Route[k].Host[1]
+           &&  Route[k].Port[0] == Route[k].Port[1]) *puff = 0;
+              else sprintf(puff, "%%%s:%d", Route[k].Host[1], Route[k].Port[1]);
+           sprintf(buff," to %s:%d%s",Route[k].Host[0],Route[k].Port[0],puff);
            eDest.Say("Config redirect enoent ", xp->Path(), buff);
            if (!xCgi[k] && cgi2)
-              {snprintf(buff,sizeof(buff), "%s?tried=%s%s", Route[k].Host,
-                                           cgi1, cgi2);
-               free(Route[k].Host); Route[k].Host = strdup(buff);
+              {bool isdup = Route[k].Host[0] == Route[k].Host[1]
+                         && Route[k].Port[0] == Route[k].Port[1];
+               for (i = 0; i < 2; i++)
+                   {snprintf(buff,sizeof(buff), "%s?tried=%s%s",
+                             Route[k].Host[i], cgi1, cgi2);
+                    free(Route[k].Host[i]); Route[k].Host[i] = strdup(buff);
+                    if (isdup) {Route[k].Host[1] = Route[k].Host[0]; break;}
+                   }
               }
            xCgi[k] = 1;
            xp = xp->Next();
           } while(xp);
       }
 
-// Check if monitoring should be enabled
+// Initialize monitoring (it won't do anything if it wasn't enabled)
 //
-   if (!isRedir || XrdXrootdMonitor::Redirect())
-      {if (!XrdXrootdMonitor::Init(Sched, &eDest, pi->myName, pi->myProg,
-                                   myInst, Port)) return 0;
-      }
+   if (!XrdXrootdMonitor::Init(Sched, &eDest, pi->myName, pi->myProg,
+                               myInst, Port)) return 0;
 
 // Add all jobs that we can run to the admin object
 //
@@ -419,6 +453,7 @@ int XrdXrootdProtocol::Config(const char *ConfigFN)
          if (ismine)
             {     if TS_Xeq("async",         xasync);
              else if TS_Xeq("chksum",        xcksum);
+             else if TS_Xeq("diglib",        xdig);
              else if TS_Xeq("export",        xexp);
              else if TS_Xeq("fslib",         xfsl);
              else if TS_Xeq("log",           xlog);
@@ -646,6 +681,46 @@ int XrdXrootdProtocol::xcksum(XrdOucStream &Config)
 }
   
 /******************************************************************************/
+/*                                  x d i g                                   */
+/******************************************************************************/
+
+/* Function: xdig
+
+   Purpose:  To parse the directive: diglib * <parms>
+
+             *         use builtin digfs library (only one supported now).
+             parms     parameters for digfs.
+
+  Output: 0 upon success or !0 upon failure.
+*/
+
+int XrdXrootdProtocol::xdig(XrdOucStream &Config)
+{
+    char parms[4096], *val;
+
+// Get the path
+//
+   if (!(val = Config.GetWord()))
+      {eDest.Emsg("Config", "digfslib not specified"); return 1;}
+
+// Make sure it refers to an internal one
+//
+   if (strcmp(val, "*"))
+      {eDest.Emsg("Config", "builtin diglib not specified"); return 1;}
+
+// Grab the parameters
+//
+    if (!Config.GetRest(parms, sizeof(parms)))
+       {eDest.Emsg("Config", "diglib parameters too long"); return 1;}
+    if (digParm) free(digParm);
+    digParm = strdup(parms);
+
+// All done
+//
+   return 0;
+}
+  
+/******************************************************************************/
 /*                                  x e x p                                   */
 /******************************************************************************/
 
@@ -721,8 +796,7 @@ int XrdXrootdProtocol::xexpdo(char *path, int popt)
 
 int XrdXrootdProtocol::xfsl(XrdOucStream &Config)
 {
-    char *val, *Slash;
-    int n = 0;
+    char *val;
 
 // Clear storage pointers
 //
@@ -869,7 +943,7 @@ int XrdXrootdProtocol::xmon(XrdOucStream &Config)
                                   "monitor rbuff value not specified",
                                   "monitor mbuff", "monitor rbuff"
                                  };
-    char  *val, *cp, *monDest[2] = {0, 0};
+    char  *val = 0, *cp, *monDest[2] = {0, 0};
     long long tempval;
     int i, monFlash = 0, monFlush=0, monMBval=0, monRBval=0, monWWval=0;
     int    monIdent = 3600, xmode=0, monMode[2] = {0, 0}, mrType, *flushDest;
@@ -1110,7 +1184,8 @@ int XrdXrootdProtocol::xprep(XrdOucStream &Config)
   
 /* Function: xred
 
-   Purpose:  To parse the directive: redirect <host>:<port> {<funcs>|[?]<path>}
+   Purpose:  To parse the directive: redirect <host>:<port>[%<prvhost>:<port>]
+                                              {<funcs>|[?]<path>}
 
              <funcs>   are one or more of the following functions that will
                        be immediately redirected to <host>:<port>. Each function
@@ -1144,21 +1219,40 @@ int XrdXrootdProtocol::xred(XrdOucStream &Config)
         {"stat",     RD_stat},
         {"trunc",    RD_trunc}
        };
-    char rHost[512], *val, *pp;
-    int i, k, neg, rPort, numopts = sizeof(rdopts)/sizeof(struct rediropts);
-    int isQ = 0;
+    static const int rHLen = 264;
+    char rHost[2][rHLen], *hP[2], *val, *pp;
+    int i, k, neg, numopts = sizeof(rdopts)/sizeof(struct rediropts);
+    int rPort[2], isQ = 0;
 
 // Get the host and port
 //
    val = Config.GetWord();
-   if (!val || !val[0] || val[0] == ':')
-      {eDest.Emsg("Config", "redirect host not specified"); return 1;}
-   if (!(pp = index(val, ':')))
-      {eDest.Emsg("Config", "redirect port not specified"); return 1;}
-   if (!(rPort = atoi(pp+1)))
-      {eDest.Emsg("Config", "redirect port is invalid");    return 1;}
-   *pp = '\0';
-   strlcpy(rHost, val, sizeof(rHost));
+
+// Check if we have two hosts here
+//
+   hP[0] = val;
+   if (!(pp = index(val, '%'))) hP[1] = 0;
+      else {hP[1] = pp+1; *pp = 0;}
+
+// Verify corectness here
+//
+   if (!(*val) || (hP[1] && !hP[1]))
+      {eDest.Emsg("Config", "malformed redirect host specification"); return 1;}
+
+// Process the hosts
+//
+   for (i = 0; i < 2; i++)
+       {if (!(val = hP[i])) break;
+        if (!val || !val[0] || val[0] == ':')
+           {eDest.Emsg("Config", "redirect host not specified"); return 1;}
+        if (!(pp = rindex(val, ':')))
+           {eDest.Emsg("Config", "redirect port not specified"); return 1;}
+        if (!(rPort[i] = atoi(pp+1)))
+           {eDest.Emsg("Config", "redirect port is invalid");    return 1;}
+        *pp = '\0';
+        strlcpy(rHost[i], val, rHLen);
+        hP[i] = rHost[i];
+       }
 
 // Set all redirect target functions
 //
@@ -1178,11 +1272,10 @@ int XrdXrootdProtocol::xred(XrdOucStream &Config)
                }
            }
         for (k = static_cast<int>(RD_open1); k < RD_Num; k++)
-            if (!Route[k].Host
-            || (!strcmp(Route[k].Host, rHost) && Route[k].Port == rPort)) break;
+            if (xred_xok(k, hP, rPort)) break;
         if (k >= RD_Num)
            {eDest.Emsg("Config", "too many diffrent path redirects"); return 1;}
-        xred_set(RD_func(k), rHost, rPort);
+        xred_set(RD_func(k), hP, rPort);
         do {if (isQ) RQList.Insert(val, k, 0);
                else  RPList.Insert(val, k, 0);
             if ((val = Config.GetWord()) && *val != '/')
@@ -1196,13 +1289,13 @@ int XrdXrootdProtocol::xred(XrdOucStream &Config)
     while (val)
           {if (!strcmp(val, "all"))
               {for (i = 0; i < numopts; i++)
-                   xred_set(rdopts[i].opval, rHost, rPort);
+                   xred_set(rdopts[i].opval, hP, rPort);
               }
               else {if ((neg = (val[0] == '-' && val[1]))) val++;
                     for (i = 0; i < numopts; i++)
                        {if (!strcmp(val, rdopts[i].opname))
                            {if (neg) xred_set(rdopts[i].opval, 0, 0);
-                               else  xred_set(rdopts[i].opval, rHost, rPort);
+                               else  xred_set(rdopts[i].opval, hP, rPort);
                             break;
                            }
                        }
@@ -1214,14 +1307,46 @@ int XrdXrootdProtocol::xred(XrdOucStream &Config)
    return 0;
 }
 
-void XrdXrootdProtocol::xred_set(RD_func func, const char *rHost, int rPort)
+
+void XrdXrootdProtocol::xred_set(RD_func func, char *rHost[2], int rPort[2])
 {
 
 // Reset static redirection
 //
-   if (Route[func].Host) free(Route[func].Host);
-   Route[func].Host = (rHost ? strdup(rHost) : 0);
-   Route[func].Port = rPort;
+   if (Route[func].Host[0]) free(Route[func].Host[0]);
+   if (Route[func].Host[0] != Route[func].Host[1]) free(Route[func].Host[1]);
+
+   if (rHost)
+      {Route[func].Host[0] = strdup(rHost[0]);
+       Route[func].Port[0] = rPort[0];
+      } else {
+       Route[func].Host[0] = Route[func].Host[1] = 0;
+       Route[func].Port[0] = Route[func].Port[1] = 0;
+       return;
+      }
+
+   if (!rHost[1])
+      {Route[func].Host[1] = Route[func].Host[0];
+       Route[func].Port[1] = Route[func].Port[0];
+      } else {
+       Route[func].Host[1] = strdup(rHost[1]);
+       Route[func].Port[1] = rPort[1];
+      }
+}
+
+bool XrdXrootdProtocol::xred_xok(int func, char *rHost[2], int rPort[2])
+{
+   if (!Route[func].Host[0]) return true;
+
+   if (strcmp(Route[func].Host[0], rHost[0])
+   ||  Route[func].Port[0] != rPort[0]) return false;
+
+   if (!rHost[1]) return Route[func].Host[0] == Route[func].Host[1];
+
+   if (strcmp(Route[func].Host[1], rHost[1])
+   ||  Route[func].Port[1] != rPort[1]) return false;
+
+   return true;
 }
 
 /******************************************************************************/

@@ -4,8 +4,8 @@ include( XRootDCommon )
 #-------------------------------------------------------------------------------
 # Shared library version
 #-------------------------------------------------------------------------------
-set( XRD_OFS_VERSION   1.0.0 )
-set( XRD_OFS_SOVERSION 1 )
+set( XRD_OFS_VERSION   2.0.0 )
+set( XRD_OFS_SOVERSION 2 )
 
 #-------------------------------------------------------------------------------
 # The XrdClient lib
@@ -27,7 +27,15 @@ add_library(
   XrdOfs/XrdOfsTPCAuth.cc       XrdOfs/XrdOfsTPCAuth.hh
   XrdOfs/XrdOfsTPCJob.cc        XrdOfs/XrdOfsTPCJob.hh
   XrdOfs/XrdOfsTPCInfo.cc       XrdOfs/XrdOfsTPCInfo.hh
-  XrdOfs/XrdOfsTPCProg.cc       XrdOfs/XrdOfsTPCProg.hh )
+  XrdOfs/XrdOfsTPCProg.cc       XrdOfs/XrdOfsTPCProg.hh
+
+  #-----------------------------------------------------------------------------
+  # XrdDig
+  #-----------------------------------------------------------------------------
+
+  XrdDig/XrdDigAuth.cc          XrdDig/XrdDigAuth.hh
+  XrdDig/XrdDigConfig.cc        XrdDig/XrdDigConfig.hh
+  XrdDig/XrdDigFS.cc            XrdDig/XrdDigFS.hh )
 
 target_link_libraries(
   XrdOfs
@@ -40,6 +48,7 @@ set_target_properties(
   PROPERTIES
   VERSION   ${XRD_OFS_VERSION}
   SOVERSION ${XRD_OFS_SOVERSION}
+  INTERFACE_LINK_LIBRARIES ""
   LINK_INTERFACE_LIBRARIES "" )
 
 #-------------------------------------------------------------------------------
