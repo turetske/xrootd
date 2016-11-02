@@ -134,6 +134,8 @@ void *XrdCmsStartMonPerf(void *carg) { return Cluster.MonPerf(); }
 
 void *XrdCmsStartMonRefs(void *carg) { return Cluster.MonRefs(); }
 
+void *XrdCmsStartMonMutex(void *carg) { return Cluster.MonMutex(); }
+
 void *XrdCmsStartMonStat(void *carg) { return CmsState.Monitor(); }
 
 void *XrdCmsStartAdmin(void *carg)
@@ -1061,6 +1063,15 @@ int XrdCmsConfig::setupManager()
            return 1;
           }
       }
+
+// Create the mutex monitoring thread
+//
+  if ((rc = XrdSysThread::Run(&tid, XrdCmsStartMonMutex, (void *)0,
+                              0, "Mutex monitor")))
+     {Say.Emsg("Config", rc, "create mutex monitor thread");
+      return 1;
+     }
+
 
 // Initialize the fast redirect queue
 //

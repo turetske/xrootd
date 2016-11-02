@@ -106,6 +106,8 @@ int         nodeInst;
 /******************************************************************************/
 
 XrdCmsCluster::XrdCmsCluster()
+  :
+     MutexStalled(false)
 {
      memset((void *)NodeTab, 0, sizeof(NodeTab));
      memset((void *)AltMans, (int)' ', sizeof(AltMans));
@@ -691,6 +693,26 @@ void *XrdCmsCluster::MonPerf()
    while(uInterval)
         {XrdSysTimer::Snooze(uInterval);
          Broadcast(allNodes, ioV, ioVnum, ioVtot);
+        }
+   return (void *)0;
+}
+
+/******************************************************************************/
+/*                               M o n M u t e x                              */
+/******************************************************************************/
+void *XrdCmsCluster::MonMutex()
+{
+   while(true)
+        {XrdSysTimer::Snooze(1);
+         if (!STMutex.TimedLock_MS(2000))
+            {Say.Emsg("MonMutex", "global mutex", "WARNING: deadlock possible; "
+                      "global mutex locked for more than 2s.");
+             MutexStalled = true;
+            }
+         else
+            {STMutex.UnLock();
+             MutexStalled = false;
+            }
         }
    return (void *)0;
 }

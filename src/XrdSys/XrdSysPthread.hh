@@ -148,6 +148,14 @@ inline int CondLock()
 
 inline void   Lock() {pthread_mutex_lock(&cs);}
 
+inline bool TimedLock_MS(unsigned ms_count)
+       {struct timespec end_timer = {0, 0};
+        clock_gettime(CLOCK_REALTIME, &end_timer);
+        end_timer.tv_sec += ms_count/1000;
+        end_timer.tv_sec += (ms_count % 1000) * 1e6;
+        return !pthread_mutex_timedlock(&cs, &end_timer);
+       }
+
 inline void UnLock() {pthread_mutex_unlock(&cs);}
 
         XrdSysMutex() {pthread_mutex_init(&cs, NULL);}

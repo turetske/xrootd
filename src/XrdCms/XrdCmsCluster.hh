@@ -168,6 +168,11 @@ void           *MonPerf();
 //
 void           *MonRefs();
 
+// Run a separate thread that will periodically acquire global mutexes and
+// warn if they cannot be acquired quickly.
+void           *MonMutex();
+bool            IsPossiblyDeadlocked() {return MutexStalled;}
+
 // Return total number of redirect references (sloppy as we don't lock it)
 //
 long long       Refs() {return SelWcnt+SelWtot+SelRcnt+SelRtot;}
@@ -259,6 +264,9 @@ int           AltMent;
 SMask_t       resetMask;        // Nodes to receive a reset event
 SMask_t       peerHost;         // Nodes that are acting as peers
 SMask_t       peerMask;         // Always ~peerHost
+
+// Track whether the mutex looks stalled
+bool          MutexStalled;
 };
 
 XRDOUC_ENUM_OPERATORS(XrdCmsCluster::CmsLSOpts)

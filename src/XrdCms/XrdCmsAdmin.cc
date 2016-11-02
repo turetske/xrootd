@@ -194,6 +194,10 @@ void XrdCmsAdmin::Login(int socknum)
                       CmsState.Update(XrdCmsState::Active, 0, sPerm);
                       Say.Emsg("Login", sMsg[sPerm], Stype, Sname);
                      }
+             else if (!strcmp("stalled",  tp))
+                     {Stream.Put(Cluster.IsPossiblyDeadlocked() ? "yes\n" : "no\n");
+                      Stream.Flush();
+                     }
              else Say.Emsg(epname, "invalid admin request,", tp);
             }
         }

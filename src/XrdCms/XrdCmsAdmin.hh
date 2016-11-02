@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <sys/uio.h>
 
+#include "XrdCms/XrdCmsCluster.hh"
 #include "XrdCms/XrdCmsProtocol.hh"
 #include "XrdCms/XrdCmsRRData.hh"
 #include "XrdOuc/XrdOucStream.hh"
