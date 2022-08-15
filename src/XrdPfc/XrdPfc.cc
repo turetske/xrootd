@@ -894,7 +894,7 @@ int Cache::LocalFilePath(const char *curl, char *buff, int blen,
 
 
 //______________________________________________________________________________
-//! Preapare the cache for a file open request. This method is called prior to
+//! Prepare the cache for a file open request. This method is called prior to
 //! actually opening a file. This method is meant to allow defering an open
 //! request or implementing the full I/O stack in the cache layer.
 //! @return <0 Error has occurred, return value is -errno; fail open request.
@@ -908,13 +908,6 @@ int Cache::Prepare(const char *curl, int oflags, mode_t mode)
    XrdCl::URL url(curl);
    std::string f_name = url.GetPath();
    std::string i_name = f_name + Info::s_infoExtension;
-
-   // Do not allow write access.
-   if (oflags & (O_WRONLY | O_RDWR | O_APPEND | O_CREAT))
-   {
-      TRACE(Warning, "Prepare write access requested on file " << f_name << ". Denying access.");
-      return -EROFS;
-   }
 
    // Intercept xrdpfc_command requests.
    if (m_configuration.m_allow_xrdpfc_command && strncmp("/xrdpfc_command/", f_name.c_str(), 16) == 0)

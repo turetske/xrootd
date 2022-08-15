@@ -936,6 +936,261 @@ int File::Read(IO *io, char* iUserBuff, long long iUserOff, int iUserSize)
 
 //------------------------------------------------------------------------------
 
+int File::Write(IO *io, char* iUserBuff, long long iUserOff, int iUserSize)
+{
+   const long long BS = m_cfi.GetBufferSize();
+
+   Stats loc_stats;
+
+   BlockList_t blks;
+
+   const int idx_first = iUserOff / BS;
+   const int idx_last  = (iUserOff + iUserSize - 1) / BS;
+
+   BlockSet_t  requested_blocks;
+   BlockList_t blks_to_request, blks_to_process, blks_processed;
+   IntList_t   blks_on_disk,    blks_direct;
+
+   // lock
+   // loop over reqired blocks:
+   //   - if on disk, skip write;
+   //   - if incoming, inc ref-count
+   //   - otherwise, we'll schedule writes to disk.
+   // unlock
+
+   m_state_cond.Lock();
+
+   if (!m_is_open)
+   {
+      m_state_cond.UnLock();
+      TRACEF(Error, "Write file is not open");
+      return -EBADF;
+   }
+   if (m_in_shutdown)
+   {
+      m_state_cond.UnLock();
+      return -ENOENT;
+   }
+
+   for (int block_idx = idx_first; block_idx <= idx_last; ++block_idx)
+   {
+      TRACEF(Dump, "Write() idx " << block_idx);
+      BlockMap_i bi = m_block_map.find(block_idx);
+
+      // In RAM or incoming?
+      if (bi != m_block_map.end())
+      {
+         inc_ref_count(bi->second);
+         TRACEF(Dump, "Read() " << (void*) iUserBuff << "inc_ref_count for existing block " << bi->second << " idx = " <<  block_idx);
+         blks_to_process.push_front(bi->second);
+      }
+      // On disk?
+      else if (m_cfi.TestBitWritten(offsetIdx(block_idx)))
+      {
+         TRACEF(Dump, "Read() read from disk " <<  (void*)iUserBuff << " idx = " << block_idx);
+         blks_on_disk.push_back(block_idx);
+      }
+      // Then we have to get it ...
+      else
+      {
+         // Is there room for one more RAM Block?
+         Block *b = PrepareBlockRequest(block_idx, io, false);
+         if (b)
+         {
+            TRACEF(Dump, "Read() inc_ref_count new " <<  (void*)iUserBuff << " idx = " << block_idx);
+            inc_ref_count(b);
+            blks_to_process.push_back(b);
+            blks_to_request.push_back(b);
+            requested_blocks.insert(b);
+         }
+      }
+   }
+
+   m_state_cond.UnLock();
+
+   ProcessBlockRequests(blks_to_request);
+
+   long long bytes_read = 0;
+   int       error_cond = 0; // to be set to -errno
+
+   // First, send out any direct requests.
+   // TODO Could send them all out in a single vector read.
+   DirectResponseHandler *direct_handler = 0;
+   int direct_size = 0;
+
+   if ( ! blks_direct.empty())
+   {
+      direct_handler = new DirectResponseHandler(blks_direct.size());
+
+      direct_size = RequestBlocksDirect(io, direct_handler, blks_direct, iUserBuff, iUserOff, iUserSize);
+
+      TRACEF(Dump, "Read() direct read requests sent out, size = " << direct_size);
+   }
+
+   // Second, read blocks from disk.
+   if ( ! blks_on_disk.empty() && bytes_read >= 0)
+   {
+      int rc = ReadBlocksFromDisk(blks_on_disk, iUserBuff, iUserOff, iUserSize);
+      TRACEF(Dump, "Read() " << (void*)iUserBuff <<" from disk finished size = " << rc);
+      if (rc >= 0)
+      {
+         bytes_read += rc;
+         loc_stats.m_BytesHit += rc;
+      }
+      else
+      {
+         error_cond = rc;
+         TRACEF(Error, "Read() failed read from disk");
+      }
+   }
+
+   // Third, loop over blocks that are available or incoming
+   int prefetchHitsRam = 0;
+   while ( ! blks_to_process.empty())
+   {
+      BlockList_t finished;
+      BlockList_t to_reissue;
+      {
+         XrdSysCondVarHelper _lck(m_state_cond);
+
+         BlockList_i bi = blks_to_process.begin();
+         while (bi != blks_to_process.end())
+         {
+            if ((*bi)->is_failed() && (*bi)->get_io() != io)
+            {
+               TRACEF(Info, "Read() requested block " << (void*)(*bi) << " failed with another io " <<
+                      (*bi)->get_io() << " - reissuing request with my io " << io);
+
+               (*bi)->reset_error_and_set_io(io);
+               to_reissue.push_back(*bi);
+               ++bi;
+            }
+            else if ((*bi)->is_finished())
+            {
+               TRACEF(Dump, "Read() requested block finished " << (void*)(*bi) << ", is_failed()=" << (*bi)->is_failed());
+               finished.push_back(*bi);
+               BlockList_i bj = bi++;
+               blks_to_process.erase(bj);
+            }
+            else
+            {
+               ++bi;
+            }
+         }
+
+         if (finished.empty() && to_reissue.empty())
+         {
+            m_state_cond.Wait();
+            continue;
+         }
+      }
+
+      ProcessBlockRequests(to_reissue);
+      to_reissue.clear();
+
+      BlockList_i bi = finished.begin();
+      while (bi != finished.end())
+      {
+         if ((*bi)->is_ok())
+         {
+            long long user_off;     // offset in user buffer
+            long long off_in_block; // offset in block
+            long long size_to_copy; // size to copy
+
+            overlap((*bi)->m_offset/BS, BS, iUserOff, iUserSize, user_off, off_in_block, size_to_copy);
+
+            TRACEF(Dump, "Read() ub=" << (void*)iUserBuff  << " from finished block " << (*bi)->m_offset/BS << " size " << size_to_copy);
+            memcpy(&iUserBuff[user_off], &((*bi)->m_buff[off_in_block]), size_to_copy);
+            bytes_read += size_to_copy;
+
+            if (requested_blocks.find(*bi) == requested_blocks.end())
+               loc_stats.m_BytesHit    += size_to_copy;
+            else
+               loc_stats.m_BytesMissed += size_to_copy;
+
+            if ((*bi)->m_prefetch)
+               prefetchHitsRam++;
+         }
+         else
+         {
+            // It has failed ... report only the first error.
+            if ( ! error_cond)
+            {
+               error_cond = (*bi)->m_errno;
+               TRACEF(Error, "Read() io " << io << ", block "<< (*bi)->m_offset/BS <<
+                      " finished with error " << -error_cond << " " << XrdSysE2T(-error_cond));
+            }
+         }
+         ++bi;
+      }
+
+      std::copy(finished.begin(), finished.end(), std::back_inserter(blks_processed));
+      finished.clear();
+   }
+
+   // Fourth, make sure all direct requests have arrived.
+   // This can not be skipped as responses write into request memory buffers.
+   if (direct_handler != 0)
+   {
+      TRACEF(Dump, "Read() waiting for direct requests ");
+
+      XrdSysCondVarHelper _lck(direct_handler->m_cond);
+
+      while (direct_handler->m_to_wait > 0)
+      {
+         direct_handler->m_cond.Wait();
+      }
+
+      if (direct_handler->m_errno == 0)
+      {
+         bytes_read += direct_size;
+         loc_stats.m_BytesBypassed += direct_size;
+      }
+      else
+      {
+         // Set error and report only if this is the first error in this read.
+         if ( ! error_cond)
+         {
+            error_cond = direct_handler->m_errno;
+            TRACEF(Error, "Read(), direct read finished with error " << -error_cond << " " << XrdSysE2T(-error_cond));
+         }
+      }
+
+      delete direct_handler;
+   }
+   assert(iUserSize >= bytes_read);
+
+   // Last, stamp and release blocks, release file.
+   {
+      XrdSysCondVarHelper _lck(m_state_cond);
+
+      // blks_to_process can be non-empty, if we're exiting with an error.
+      std::copy(blks_to_process.begin(), blks_to_process.end(), std::back_inserter(blks_processed));
+
+      for (BlockList_i bi = blks_processed.begin(); bi != blks_processed.end(); ++bi)
+      {
+         TRACEF(Dump, "Read() dec_ref_count " << (void*)(*bi) << " idx = " << (int)((*bi)->m_offset/BufferSize()));
+         dec_ref_count(*bi);
+      }
+
+      // update prefetch score
+      m_prefetch_hit_cnt += prefetchHitsRam;
+      for (IntList_i d = blks_on_disk.begin(); d !=  blks_on_disk.end(); ++d)
+      {
+         if (m_cfi.TestBitPrefetch(offsetIdx(*d)))
+            m_prefetch_hit_cnt++;
+      }
+      m_prefetch_score = float(m_prefetch_hit_cnt)/m_prefetch_read_cnt;
+   }
+
+   m_stats.AddReadStats(loc_stats);
+
+   return error_cond ? error_cond : bytes_read;
+}
+
+
+//------------------------------------------------------------------------------
+
 void File::WriteBlockToDisk(Block* b)
 {
    // write block buffer into disk file

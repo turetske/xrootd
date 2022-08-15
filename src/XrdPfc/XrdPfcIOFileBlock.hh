@@ -63,6 +63,8 @@ public:
 
    virtual void Update(XrdOucCacheIO &iocp);
 
+   virtual int Write(char *Buffer, long long Offset, int Length) { return -ENOTSUP; }
+
 private:
    long long                  m_blocksize;       //!< size of file-block
    std::map<int, File*>       m_blocks;          //!< map of created blocks

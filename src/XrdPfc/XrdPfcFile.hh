@@ -174,6 +174,9 @@ public:
    //! Normal read.
    int Read (IO *io, char* buff, long long offset, int size);
 
+   //! Normal Write.
+   int Write (IO *io, char *buff, long long offset, int size);
+
    //----------------------------------------------------------------------
    //! \brief Data and cinfo files are open.
    //----------------------------------------------------------------------

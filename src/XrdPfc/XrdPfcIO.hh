@@ -36,7 +36,7 @@ public:
 
    using XrdOucCacheIO::Write;
 
-   virtual int Write(char *Buffer, long long Offset, int Length) { return -ENOTSUP; }
+   virtual int Write(char *Buffer, long long Offset, int Length);
 
    virtual void Update(XrdOucCacheIO &iocp);
 

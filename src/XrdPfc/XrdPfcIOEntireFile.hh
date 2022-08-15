@@ -75,6 +75,8 @@ public:
 
    virtual void Update(XrdOucCacheIO &iocp);
 
+   virtual int Write(char *Buffer, long long Offset, int Length);
+
    //! \brief Abstract virtual method of XrdPfcIO
    //! Called to check if destruction needs to be done in a separate task.
    bool ioActive() /* override */;

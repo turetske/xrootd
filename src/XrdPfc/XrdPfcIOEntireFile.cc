@@ -190,6 +190,30 @@ int IOEntireFile::Read(char *buff, long long off, int size)
    return (retval < 0) ? retval : bytes_read;
 }
 
+//______________________________________________________________________________
+int IOEntirefile::Write(char *buff, long long off, int size)
+{
+   TRACEIO(Dump, "Write() " << this << " off: " << off << " size: " << size);
+
+   if (off < 0) {return -EINVAL;}
+
+   ssize_t bytes_written = 0;
+   ssize_t retval = m_file->Write(this, buff, off, size);
+   if (retval >= 0)
+   {
+      bytes_read = retval;
+      size -= retval;
+
+      if (size) {TRACEIO(Warning, "Write() bytes short " << size);
+   }
+   else
+   {
+      TRACEIO(Warning, "Write() error in File::Write(), exit status=" << retval
+              << ", error=" << XrdSysE2T(-retval));
+   }
+
+   return (retval < 0) ? retval : bytes_read;
+}
 
 /*
  * Perform a readv from the cache
