@@ -599,7 +599,7 @@ XrdCmsRouting *XrdCmsProtocol::Admit()
 // Construct environment for incoming node
 //
    XrdOucEnv cgiEnv((const char *)Data.envCGI);
-   const char *altName = cgiEnv.Get("myHN");
+   const char *altName = cgiEnv.Get("ovHN");
    if (altName) {
      std::string oldName(Link->Host());
      char buff[512];

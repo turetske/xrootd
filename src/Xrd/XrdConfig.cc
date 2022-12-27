@@ -576,6 +576,7 @@ int XrdConfig::Configure(int argc, char **argv)
    const char *ipAddrName;
    if (envName) {
       myName = envName;
+      XrdOucEnv::Export("OVERRIDEXRDHOST", myName.c_str());
    } else if ((ipAddrName = myIPAddr->Name(0, &temp))) {
       myName = ipAddrName;
    } else {
