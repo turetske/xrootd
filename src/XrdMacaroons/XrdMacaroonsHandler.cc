@@ -192,7 +192,7 @@ Handler::GenerateActivities(const XrdHttpExtReq & req, const std::string &resour
 bool
 Handler::MatchesPath(const char *verb, const char *path)
 {
-    return !strcmp(verb, "POST") || !strncmp(path, "/.well-known/", 13) ||
+    return !strcmp(verb, "POST") || !strncmp(path, "/.well-known/oauth-authorization-server", 13) ||
            !strncmp(path, "/.oauth2/", 9);
 }
 
